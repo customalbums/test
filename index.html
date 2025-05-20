@@ -2,29 +2,53 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>FPT Game - Kill Mutants</title>
+  <title>Mutant Maze Game</title>
   <style>
-    body { margin: 0; overflow: hidden; }
+    body { margin: 0; overflow: hidden; font-family: sans-serif; }
     canvas { display: block; }
-    #instructions {
+
+    #startScreen {
       position: absolute;
-      top: 50%;
-      width: 100%;
-      text-align: center;
-      font-size: 24px;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 2;
+    }
+
+    #startButton {
+      font-size: 48px;
+      padding: 20px 40px;
+      background-color: #ff0000;
       color: white;
-      z-index: 1;
+      border: none;
+      cursor: pointer;
+      border-radius: 10px;
+    }
+
+    #startButton:hover {
+      background-color: #cc0000;
+    }
+
+    .blurred {
+      filter: blur(4px);
     }
   </style>
 </head>
 <body>
-  <div id="instructions">Click to Start. Move: W/A/S/D | Shoot: Left Click</div>
+  <div id="startScreen">
+    <button id="startButton">Start Game</button>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/controls/PointerLockControls.js"></script>
   <script>
-    let camera, scene, renderer, controls;
-    let objects = [], bullets = [], enemies = [];
+    let scene, camera, renderer, controls;
+    let startCameraRotation = 0;
+    let inGame = false;
+    let objects = [], enemies = [], bullets = [];
     const velocity = new THREE.Vector3();
     const direction = new THREE.Vector3();
     let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
@@ -34,27 +58,25 @@
     animate();
 
     function init() {
-      // Scene setup
       camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 1000);
       scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x222222);
+      scene.background = new THREE.Color(0x111111);
 
       const light = new THREE.HemisphereLight(0xffffff, 0x444444);
       light.position.set(0, 200, 0);
       scene.add(light);
 
-      const floorGeometry = new THREE.PlaneGeometry(200, 200);
-      const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x006600 });
-      const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+      // Floor
+      const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardMaterial({ color: 0x003300 }));
       floor.rotation.x = -Math.PI / 2;
       scene.add(floor);
 
-      // Maze walls
-      const wallMaterial = new THREE.MeshStandardMaterial({ color: 0x888888 });
+      // Walls
+      const wallMat = new THREE.MeshStandardMaterial({ color: 0x666666 });
       for (let x = -80; x <= 80; x += 20) {
         for (let z = -80; z <= 80; z += 20) {
           if (Math.random() > 0.7) {
-            const wall = new THREE.Mesh(new THREE.BoxGeometry(10, 20, 10), wallMaterial);
+            const wall = new THREE.Mesh(new THREE.BoxGeometry(10, 20, 10), wallMat);
             wall.position.set(x, 10, z);
             scene.add(wall);
             objects.push(wall);
@@ -62,16 +84,12 @@
         }
       }
 
-      // Add enemies (mutants)
-      const enemyMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 });
-      for (let i = 0; i < 10; i++) {
-        const enemy = new THREE.Mesh(new THREE.SphereGeometry(3, 16, 16), enemyMaterial);
-        enemy.position.set(
-          (Math.random() - 0.5) * 180,
-          3,
-          (Math.random() - 0.5) * 180
-        );
-        enemy.name = "enemy";
+      // Enemy creatures walking by
+      const enemyMat = new THREE.MeshStandardMaterial({ color: 0xaa0000 });
+      for (let i = 0; i < 5; i++) {
+        const enemy = new THREE.Mesh(new THREE.SphereGeometry(3, 16, 16), enemyMat);
+        enemy.position.set(-50 + i * 25, 3, -10);
+        enemy.userData = { walking: true };
         scene.add(enemy);
         enemies.push(enemy);
       }
@@ -80,18 +98,13 @@
       renderer = new THREE.WebGLRenderer();
       renderer.setSize(window.innerWidth, window.innerHeight);
       document.body.appendChild(renderer.domElement);
+      renderer.domElement.classList.add("blurred");
 
       // Controls
       controls = new THREE.PointerLockControls(camera, document.body);
-      document.getElementById('instructions').addEventListener('click', () => controls.lock());
-      controls.addEventListener('lock', () => document.getElementById('instructions').style.display = 'none');
-      controls.addEventListener('unlock', () => document.getElementById('instructions').style.display = '');
-
-      scene.add(controls.getObject());
-
-      // Key input
-      document.addEventListener('keydown', (event) => {
-        switch (event.code) {
+      document.addEventListener('keydown', (e) => {
+        if (!inGame) return;
+        switch (e.code) {
           case 'KeyW': moveForward = true; break;
           case 'KeyA': moveLeft = true; break;
           case 'KeyS': moveBackward = true; break;
@@ -99,8 +112,9 @@
         }
       });
 
-      document.addEventListener('keyup', (event) => {
-        switch (event.code) {
+      document.addEventListener('keyup', (e) => {
+        if (!inGame) return;
+        switch (e.code) {
           case 'KeyW': moveForward = false; break;
           case 'KeyA': moveLeft = false; break;
           case 'KeyS': moveBackward = false; break;
@@ -108,9 +122,9 @@
         }
       });
 
-      // Mouse click = shoot
       document.addEventListener('click', () => {
-        if (!controls.isLocked) return;
+        if (!inGame || !controls.isLocked) return;
+
         const bullet = new THREE.Mesh(
           new THREE.SphereGeometry(0.5, 8, 8),
           new THREE.MeshBasicMaterial({ color: 0xffff00 })
@@ -122,7 +136,32 @@
         bullets.push(bullet);
       });
 
-      // Resize
+      // Start button logic
+      document.getElementById("startButton").addEventListener("click", () => {
+        document.getElementById("startScreen").style.display = "none";
+        renderer.domElement.classList.remove("blurred");
+
+        inGame = true;
+        scene.remove(...enemies); // Remove intro enemies
+
+        // Add gameplay enemies
+        const enemyMat = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+        for (let i = 0; i < 10; i++) {
+          const enemy = new THREE.Mesh(new THREE.SphereGeometry(3, 16, 16), enemyMat);
+          enemy.position.set(
+            (Math.random() - 0.5) * 180,
+            3,
+            (Math.random() - 0.5) * 180
+          );
+          enemy.name = "enemy";
+          scene.add(enemy);
+          enemies.push(enemy);
+        }
+
+        scene.add(controls.getObject());
+        controls.lock();
+      });
+
       window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
@@ -135,6 +174,20 @@
       const time = performance.now();
       const delta = (time - prevTime) / 1000;
 
+      if (!inGame) {
+        startCameraRotation += delta * 0.5;
+        camera.position.set(0, 5, 30);
+        camera.lookAt(Math.sin(startCameraRotation) * 30, 5, 0);
+
+        enemies.forEach(enemy => {
+          enemy.position.x += Math.sin(time * 0.001 + enemy.position.z) * 0.05;
+        });
+
+        renderer.render(scene, camera);
+        return;
+      }
+
+      // Movement
       velocity.x -= velocity.x * 10.0 * delta;
       velocity.z -= velocity.z * 10.0 * delta;
 
@@ -148,11 +201,9 @@
       controls.moveRight(-velocity.x * delta);
       controls.moveForward(-velocity.z * delta);
 
-      // Move bullets
+      // Bullet movement and collision
       bullets.forEach((bullet, i) => {
         bullet.position.addScaledVector(bullet.userData.velocity, delta);
-
-        // Bullet-enemy collision
         enemies.forEach((enemy, j) => {
           if (enemy && bullet.position.distanceTo(enemy.position) < 3) {
             scene.remove(enemy);
@@ -161,8 +212,6 @@
             bullets.splice(i, 1);
           }
         });
-
-        // Remove bullets after range
         if (bullet.position.length() > 500) {
           scene.remove(bullet);
           bullets.splice(i, 1);
