@@ -1,9 +1,177 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Lux Albums - Custom Luxury Photo Albums</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-  <link href="https://fonts.googleapis.com/css2?family=Playfair
+  <meta charset="UTF-8">
+  <title>FPT Game - Kill Mutants</title>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    canvas { display: block; }
+    #instructions {
+      position: absolute;
+      top: 50%;
+      width: 100%;
+      text-align: center;
+      font-size: 24px;
+      color: white;
+      z-index: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="instructions">Click to Start. Move: W/A/S/D | Shoot: Left Click</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/controls/PointerLockControls.js"></script>
+  <script>
+    let camera, scene, renderer, controls;
+    let objects = [], bullets = [], enemies = [];
+    const velocity = new THREE.Vector3();
+    const direction = new THREE.Vector3();
+    let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+    let prevTime = performance.now();
+
+    init();
+    animate();
+
+    function init() {
+      // Scene setup
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 1000);
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x222222);
+
+      const light = new THREE.HemisphereLight(0xffffff, 0x444444);
+      light.position.set(0, 200, 0);
+      scene.add(light);
+
+      const floorGeometry = new THREE.PlaneGeometry(200, 200);
+      const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x006600 });
+      const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+      floor.rotation.x = -Math.PI / 2;
+      scene.add(floor);
+
+      // Maze walls
+      const wallMaterial = new THREE.MeshStandardMaterial({ color: 0x888888 });
+      for (let x = -80; x <= 80; x += 20) {
+        for (let z = -80; z <= 80; z += 20) {
+          if (Math.random() > 0.7) {
+            const wall = new THREE.Mesh(new THREE.BoxGeometry(10, 20, 10), wallMaterial);
+            wall.position.set(x, 10, z);
+            scene.add(wall);
+            objects.push(wall);
+          }
+        }
+      }
+
+      // Add enemies (mutants)
+      const enemyMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+      for (let i = 0; i < 10; i++) {
+        const enemy = new THREE.Mesh(new THREE.SphereGeometry(3, 16, 16), enemyMaterial);
+        enemy.position.set(
+          (Math.random() - 0.5) * 180,
+          3,
+          (Math.random() - 0.5) * 180
+        );
+        enemy.name = "enemy";
+        scene.add(enemy);
+        enemies.push(enemy);
+      }
+
+      // Renderer
+      renderer = new THREE.WebGLRenderer();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
+
+      // Controls
+      controls = new THREE.PointerLockControls(camera, document.body);
+      document.getElementById('instructions').addEventListener('click', () => controls.lock());
+      controls.addEventListener('lock', () => document.getElementById('instructions').style.display = 'none');
+      controls.addEventListener('unlock', () => document.getElementById('instructions').style.display = '');
+
+      scene.add(controls.getObject());
+
+      // Key input
+      document.addEventListener('keydown', (event) => {
+        switch (event.code) {
+          case 'KeyW': moveForward = true; break;
+          case 'KeyA': moveLeft = true; break;
+          case 'KeyS': moveBackward = true; break;
+          case 'KeyD': moveRight = true; break;
+        }
+      });
+
+      document.addEventListener('keyup', (event) => {
+        switch (event.code) {
+          case 'KeyW': moveForward = false; break;
+          case 'KeyA': moveLeft = false; break;
+          case 'KeyS': moveBackward = false; break;
+          case 'KeyD': moveRight = false; break;
+        }
+      });
+
+      // Mouse click = shoot
+      document.addEventListener('click', () => {
+        if (!controls.isLocked) return;
+        const bullet = new THREE.Mesh(
+          new THREE.SphereGeometry(0.5, 8, 8),
+          new THREE.MeshBasicMaterial({ color: 0xffff00 })
+        );
+        bullet.position.copy(camera.position);
+        bullet.quaternion.copy(camera.quaternion);
+        bullet.userData.velocity = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).multiplyScalar(100);
+        scene.add(bullet);
+        bullets.push(bullet);
+      });
+
+      // Resize
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const time = performance.now();
+      const delta = (time - prevTime) / 1000;
+
+      velocity.x -= velocity.x * 10.0 * delta;
+      velocity.z -= velocity.z * 10.0 * delta;
+
+      direction.z = Number(moveForward) - Number(moveBackward);
+      direction.x = Number(moveRight) - Number(moveLeft);
+      direction.normalize();
+
+      if (moveForward || moveBackward) velocity.z -= direction.z * 400.0 * delta;
+      if (moveLeft || moveRight) velocity.x -= direction.x * 400.0 * delta;
+
+      controls.moveRight(-velocity.x * delta);
+      controls.moveForward(-velocity.z * delta);
+
+      // Move bullets
+      bullets.forEach((bullet, i) => {
+        bullet.position.addScaledVector(bullet.userData.velocity, delta);
+
+        // Bullet-enemy collision
+        enemies.forEach((enemy, j) => {
+          if (enemy && bullet.position.distanceTo(enemy.position) < 3) {
+            scene.remove(enemy);
+            enemies.splice(j, 1);
+            scene.remove(bullet);
+            bullets.splice(i, 1);
+          }
+        });
+
+        // Remove bullets after range
+        if (bullet.position.length() > 500) {
+          scene.remove(bullet);
+          bullets.splice(i, 1);
+        }
+      });
+
+      renderer.render(scene, camera);
+      prevTime = time;
+    }
+  </script>
+</body>
+</html>
